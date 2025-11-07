@@ -9,7 +9,7 @@ import java.util.List;
 
 
 @Repository
-public interface BerealRepository extends JpaRepository<Post, Long> {
+public interface PostRepository extends JpaRepository<Post, Long> {
     List<Post> findByUserIdAndPostedAtBetween(Long userId, LocalDateTime startOfDay, LocalDateTime endOfDay);
     List<Post> findByPostedAtBetween(LocalDateTime startOfDay, LocalDateTime endOfDay);
 }

@@ -6,8 +6,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 @SpringBootApplication
 public class BerealApplication {
 
-	public static void main(String[] args) {
-		SpringApplication.run(BerealApplication.class, args);
-	}
+    public static void main(String[] args) {
+        SpringApplication.run(BerealApplication.class, args);
+    }
 
 }
