@@ -1,4 +1,8 @@
 package org.example.bereal.controller;
+
+import jakarta.validation.Valid;
+import org.example.bereal.dto.PostDTO;
+import org.example.bereal.mapper.PostMapper;
 import org.example.bereal.model.Post;
 import org.example.bereal.service.PostService;
 import org.springframework.http.ResponseEntity;
@@ -15,45 +19,36 @@ public class PostController {
         this.postService = postService;
     }
 
-    // --- C (Create) ---
-    // POST /api/posts
     @PostMapping
-    public ResponseEntity<Post> createPost(@RequestBody Post post) {
-        // В реальном приложении здесь будет @RequestParam MultipartFile для файлов
-        Post createdPost = postService.createPost(post);
-        return ResponseEntity.ok(createdPost);
+    public ResponseEntity<PostDTO> createPost(@Valid @RequestBody PostDTO dto) {
+        Post created = postService.createPost(PostMapper.fromDto(dto));
+        return ResponseEntity.ok(PostMapper.toDto(created));
     }
 
-    // --- R (Read - By ID) ---
-    // GET /api/posts/{id}
     @GetMapping("/{id}")
-    public ResponseEntity<Post> getPost(@PathVariable Long id) {
+    public ResponseEntity<PostDTO> getPost(@PathVariable Long id) {
         return postService.getPostById(id)
+                .map(PostMapper::toDto)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    // --- R (Read - All) ---
-    // GET /api/posts
     @GetMapping
-    public List<Post> getAllPosts() {
-        return postService.getAllPosts();
+    public List<PostDTO> getAllPosts() {
+        return postService.getAllPosts().stream().map(PostMapper::toDto).toList();
     }
 
-    // --- U (Update) ---
-    // PUT /api/posts/{id}
+    @GetMapping("/today")
+    public List<PostDTO> getTodayPosts() {
+        return postService.getTodayPosts().stream().map(PostMapper::toDto).toList();
+    }
+
     @PutMapping("/{id}")
-    public ResponseEntity<Post> updatePost(@PathVariable Long id, @RequestBody Post postDetails) {
-        try {
-            Post updatedPost = postService.updatePost(id, postDetails);
-            return ResponseEntity.ok(updatedPost);
-        } catch (RuntimeException e) {
-            return ResponseEntity.notFound().build();
-        }
+    public ResponseEntity<PostDTO> updatePost(@PathVariable Long id, @RequestBody PostDTO dto) {
+        Post updated = postService.updatePost(id, PostMapper.fromDto(dto));
+        return ResponseEntity.ok(PostMapper.toDto(updated));
     }
 
-    // --- D (Delete) ---
-    // DELETE /api/posts/{id}
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deletePost(@PathVariable Long id) {
         postService.deletePost(id);

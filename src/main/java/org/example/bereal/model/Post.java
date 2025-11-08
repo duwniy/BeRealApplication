@@ -6,28 +6,36 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "posts")
-@Data // Аннотация Lombok для автоматической генерации геттеров, сеттеров и toString
+@Data
 public class Post {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // ID пользователя, который сделал пост
+    @Column(nullable = false)
     private Long userId;
 
-    // URL для основного (заднего) изображения
     private String primaryImageUrl;
-
-    // URL для вторичного (селфи) изображения
     private String secondaryImageUrl;
 
-    // Время публикации
+    @Column(nullable = false, updatable = false)
     private LocalDateTime postedAt;
 
-    // Флаг, указывающий, был ли пост сделан поздно (за пределами 2-мин. окна)
     private boolean isLate = false;
+    private String caption;
 
-    // Конструкторы, геттеры/сеттеры (генерируются Lombok @Data)
+    @Enumerated(EnumType.STRING)
+    private Visibility visibility = Visibility.PUBLIC;
+
+    @PrePersist
+    protected void onCreate() {
+        this.postedAt = LocalDateTime.now();
+    }
+
+    public enum Visibility {
+        PUBLIC, FRIENDS_ONLY, PRIVATE
+    }
 }
+
 

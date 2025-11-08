@@ -3,7 +3,9 @@ package org.example.bereal.service;
 import org.example.bereal.model.Post;
 import org.example.bereal.repository.PostRepository;
 import org.springframework.stereotype.Service;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -16,40 +18,49 @@ public class PostService {
         this.postRepository = postRepository;
     }
 
-    // --- CREATE (Создание поста) ---
-    public Post createPost(Post postData) {
-        LocalDateTime now = LocalDateTime.now();
-        // В реальном приложении здесь будет логика проверки 2-минутного окна.
-        // Сейчас просто установим время публикации.
-        postData.setPostedAt(now);
-        // postData.setIsLate(checkIfLate(now)); // Предполагаемая логика
+    public Post createPost(Post post) {
+        if (post.getUserId() == null)
+            throw new IllegalArgumentException("User ID cannot be null");
 
-        // Здесь также будет логика загрузки изображений в S3/MinIO
-        // postData.setPrimaryImageUrl(uploadFile(postData.getPrimaryFile()));
-
-        return postRepository.save(postData);
+        post.setPostedAt(LocalDateTime.now());
+        post.setLate(checkIfLate(post.getPostedAt()));
+        return postRepository.save(post);
     }
 
-    // --- READ (Получение по ID) ---
+    private boolean checkIfLate(LocalDateTime postedAt) {
+        // Пример: допустимое окно — 2 минуты после "времени вызова"
+        LocalDateTime windowStart = postedAt.withSecond(0).withNano(0);
+        return postedAt.isAfter(windowStart.plusMinutes(2));
+    }
+
     public Optional<Post> getPostById(Long id) {
         return postRepository.findById(id);
     }
 
-    // --- READ (Получение всех постов - для примера) ---
     public List<Post> getAllPosts() {
         return postRepository.findAll();
     }
 
-    // --- UPDATE (Обновление поста - редко используется в стиле BeReal, но возможно для подписи) ---
-    public Post updatePost(Long id, Post postDetails) {
-        // Предположим, можно обновить только подпись или статус
-        // post.setCaption(postDetails.getCaption());
-        // post.setIsLate(postDetails.isLate());
-        return postRepository.findById(id).map(postRepository::save).orElseThrow(() -> new RuntimeException("Post not found with id " + id));
+    public Post updatePost(Long id, Post newPost) {
+        return postRepository.findById(id)
+                .map(existing -> {
+                    existing.setPrimaryImageUrl(newPost.getPrimaryImageUrl());
+                    existing.setSecondaryImageUrl(newPost.getSecondaryImageUrl());
+                    existing.setCaption(newPost.getCaption());
+                    existing.setVisibility(newPost.getVisibility());
+                    return postRepository.save(existing);
+                })
+                .orElseThrow(() -> new RuntimeException("Post not found"));
     }
 
-    // --- DELETE (Удаление поста) ---
     public void deletePost(Long id) {
         postRepository.deleteById(id);
+    }
+
+    public List<Post> getTodayPosts() {
+        LocalDate today = LocalDate.now();
+        LocalDateTime start = today.atStartOfDay();
+        LocalDateTime end = today.atTime(LocalTime.MAX);
+        return postRepository.findByPostedAtBetween(start, end);
     }
 }
