@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import org.example.bereal.dto.PostDTO;
 import org.example.bereal.mapper.PostMapper;
 import org.example.bereal.model.Post;
+import org.example.bereal.security.JwtUtil;
 import org.example.bereal.service.ImageService;
 import org.example.bereal.service.PostService;
 import org.slf4j.Logger;
@@ -29,31 +30,28 @@ public class PostController {
 
     private final PostService postService;
     private final ImageService imageService;
+    private final JwtUtil jwtUtil; // ← Добавляем JwtUtil
 
-    public PostController(PostService postService, ImageService imageService) {
+    public PostController(PostService postService, ImageService imageService, JwtUtil jwtUtil) {
         this.postService = postService;
         this.imageService = imageService;
+        this.jwtUtil = jwtUtil; // ← Инжектим JwtUtil
     }
 
-    /**
-     * Создать новый пост с изображениями
-     */
     @PostMapping(consumes = "multipart/form-data")
     public ResponseEntity<PostDTO> createPost(
             @RequestParam("primaryImage") MultipartFile primaryImage,
             @RequestParam("secondaryImage") MultipartFile secondaryImage,
             @RequestParam(value = "caption", required = false) String caption,
             @RequestParam(value = "visibility", defaultValue = "PUBLIC") String visibility,
-            Authentication authentication) throws IOException {
+            @RequestHeader("Authorization") String authHeader) throws IOException { // ← Получаем токен из заголовка
 
-        Long userId = extractUserId(authentication);
+        Long userId = extractUserIdFromToken(authHeader); // ← Используем новый метод
         log.info("User {} creating new post", userId);
 
-        // Загрузка изображений
         String primaryUrl = imageService.uploadImage(primaryImage, userId, "primary");
         String secondaryUrl = imageService.uploadImage(secondaryImage, userId, "secondary");
 
-        // Создание поста
         Post post = new Post();
         post.setUserId(userId);
         post.setPrimaryImageUrl(primaryUrl);
@@ -67,15 +65,12 @@ public class PostController {
                 .body(PostMapper.toDto(created));
     }
 
-    /**
-     * Получить пост по ID
-     */
     @GetMapping("/{id}")
     public ResponseEntity<PostDTO> getPost(
             @PathVariable Long id,
-            Authentication authentication) {
+            @RequestHeader("Authorization") String authHeader) {
 
-        Long currentUserId = extractUserId(authentication);
+        Long currentUserId = extractUserIdFromToken(authHeader);
 
         return postService.getVisiblePostById(id, currentUserId)
                 .map(PostMapper::toDto)
@@ -83,18 +78,15 @@ public class PostController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    /**
-     * Получить все видимые посты с пагинацией
-     */
     @GetMapping
     public ResponseEntity<Page<PostDTO>> getAllPosts(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "postedAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir,
-            Authentication authentication) {
+            @RequestHeader("Authorization") String authHeader) {
 
-        Long userId = extractUserId(authentication);
+        Long userId = extractUserIdFromToken(authHeader);
 
         Sort.Direction direction = sortDir.equalsIgnoreCase("asc")
                 ? Sort.Direction.ASC
@@ -107,12 +99,10 @@ public class PostController {
         return ResponseEntity.ok(posts);
     }
 
-    /**
-     * Получить посты друзей
-     */
     @GetMapping("/friends")
-    public ResponseEntity<List<PostDTO>> getFriendsPosts(Authentication authentication) {
-        Long userId = extractUserId(authentication);
+    public ResponseEntity<List<PostDTO>> getFriendsPosts(
+            @RequestHeader("Authorization") String authHeader) {
+        Long userId = extractUserIdFromToken(authHeader);
 
         List<PostDTO> posts = postService.getFriendsPosts(userId)
                 .stream()
@@ -122,12 +112,10 @@ public class PostController {
         return ResponseEntity.ok(posts);
     }
 
-    /**
-     * Получить посты, созданные сегодня
-     */
     @GetMapping("/today")
-    public ResponseEntity<List<PostDTO>> getTodayPosts(Authentication authentication) {
-        Long userId = extractUserId(authentication);
+    public ResponseEntity<List<PostDTO>> getTodayPosts(
+            @RequestHeader("Authorization") String authHeader) {
+        Long userId = extractUserIdFromToken(authHeader);
 
         List<PostDTO> posts = postService.getTodayPosts()
                 .stream()
@@ -139,22 +127,18 @@ public class PostController {
         return ResponseEntity.ok(posts);
     }
 
-    /**
-     * Получить посты конкретного пользователя
-     */
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<PostDTO>> getUserPosts(
             @PathVariable Long userId,
-            Authentication authentication) {
+            @RequestHeader("Authorization") String authHeader) {
 
-        Long currentUserId = extractUserId(authentication);
+        Long currentUserId = extractUserIdFromToken(authHeader);
 
         List<PostDTO> posts = postService.getUserPosts(userId)
                 .stream()
                 .filter(post -> {
-                    // Показываем только видимые посты
                     if (post.getUserId().equals(currentUserId)) {
-                        return true; // Свои посты всегда видны
+                        return true;
                     }
                     return post.getVisibility() == Post.Visibility.PUBLIC;
                 })
@@ -164,14 +148,14 @@ public class PostController {
         return ResponseEntity.ok(posts);
     }
 
-    /**
-     * Обновить пост (только caption и visibility)
-     */
     @PutMapping("/{id}")
     public ResponseEntity<PostDTO> updatePost(
             @PathVariable Long id,
             @RequestParam(value = "caption", required = false) String caption,
-            @RequestParam(value = "visibility", required = false) String visibility) {
+            @RequestParam(value = "visibility", required = false) String visibility,
+            @RequestHeader("Authorization") String authHeader) { // ← Добавили authHeader
+
+        Long currentUserId = extractUserIdFromToken(authHeader);
 
         Post updateData = new Post();
         updateData.setCaption(caption);
@@ -180,26 +164,29 @@ public class PostController {
             updateData.setVisibility(Post.Visibility.valueOf(visibility.toUpperCase()));
         }
 
-        Post updated = postService.updatePost(id, updateData);
+        Post updated = postService.updatePost(id, updateData, currentUserId); // ← Передаём userId
         return ResponseEntity.ok(PostMapper.toDto(updated));
     }
 
-    /**
-     * Удалить пост
-     */
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deletePost(@PathVariable Long id) {
-        postService.deletePost(id);
+    public ResponseEntity<Void> deletePost(
+            @PathVariable Long id,
+            @RequestHeader("Authorization") String authHeader) { // ← Добавили authHeader
+
+        Long currentUserId = extractUserIdFromToken(authHeader);
+        postService.deletePost(id, currentUserId);
         return ResponseEntity.noContent().build();
     }
 
     /**
-     * Извлекает ID пользователя из Authentication
+     * Извлекает userId из JWT токена
      */
-    private Long extractUserId(Authentication authentication) {
-        if (authentication == null || authentication.getName() == null) {
-            throw new IllegalStateException("User not authenticated");
+    private Long extractUserIdFromToken(String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            throw new IllegalStateException("Invalid Authorization header");
         }
-        return Long.parseLong(authentication.getName());
+
+        String token = authHeader.substring(7);
+        return jwtUtil.extractUserId(token); // ← Используем метод из JwtUtil
     }
 }

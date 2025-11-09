@@ -3,10 +3,10 @@ package org.example.bereal.controller;
 import org.example.bereal.dto.FriendshipDTO;
 import org.example.bereal.mapper.FriendshipMapper;
 import org.example.bereal.model.Friendship;
+import org.example.bereal.security.JwtUtil;
 import org.example.bereal.service.FriendshipService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -17,17 +17,19 @@ import java.util.stream.Collectors;
 public class FriendshipController {
 
     private final FriendshipService friendshipService;
+    private final JwtUtil jwtUtil; // ← Добавляем
 
-    public FriendshipController(FriendshipService friendshipService) {
+    public FriendshipController(FriendshipService friendshipService, JwtUtil jwtUtil) {
         this.friendshipService = friendshipService;
+        this.jwtUtil = jwtUtil; // ← Инжектим
     }
 
     @PostMapping("/request/{friendId}")
     public ResponseEntity<FriendshipDTO> sendFriendRequest(
             @PathVariable Long friendId,
-            Authentication authentication) {
+            @RequestHeader("Authorization") String authHeader) {
 
-        Long userId = Long.parseLong(authentication.getName());
+        Long userId = extractUserIdFromToken(authHeader);
         Friendship friendship = friendshipService.sendFriendRequest(userId, friendId);
 
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -37,9 +39,9 @@ public class FriendshipController {
     @PostMapping("/accept/{requesterId}")
     public ResponseEntity<FriendshipDTO> acceptFriendRequest(
             @PathVariable Long requesterId,
-            Authentication authentication) {
+            @RequestHeader("Authorization") String authHeader) {
 
-        Long userId = Long.parseLong(authentication.getName());
+        Long userId = extractUserIdFromToken(authHeader);
         Friendship friendship = friendshipService.acceptFriendRequest(userId, requesterId);
 
         return ResponseEntity.ok(FriendshipMapper.toDto(friendship));
@@ -48,9 +50,9 @@ public class FriendshipController {
     @PostMapping("/reject/{requesterId}")
     public ResponseEntity<Void> rejectFriendRequest(
             @PathVariable Long requesterId,
-            Authentication authentication) {
+            @RequestHeader("Authorization") String authHeader) {
 
-        Long userId = Long.parseLong(authentication.getName());
+        Long userId = extractUserIdFromToken(authHeader);
         friendshipService.rejectFriendRequest(userId, requesterId);
 
         return ResponseEntity.noContent().build();
@@ -59,25 +61,27 @@ public class FriendshipController {
     @DeleteMapping("/{friendId}")
     public ResponseEntity<Void> removeFriend(
             @PathVariable Long friendId,
-            Authentication authentication) {
+            @RequestHeader("Authorization") String authHeader) {
 
-        Long userId = Long.parseLong(authentication.getName());
+        Long userId = extractUserIdFromToken(authHeader);
         friendshipService.removeFriend(userId, friendId);
 
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping
-    public ResponseEntity<List<Long>> getFriends(Authentication authentication) {
-        Long userId = Long.parseLong(authentication.getName());
+    public ResponseEntity<List<Long>> getFriends(
+            @RequestHeader("Authorization") String authHeader) {
+        Long userId = extractUserIdFromToken(authHeader);
         List<Long> friendIds = friendshipService.getFriendIds(userId);
 
         return ResponseEntity.ok(friendIds);
     }
 
     @GetMapping("/requests/pending")
-    public ResponseEntity<List<FriendshipDTO>> getPendingRequests(Authentication authentication) {
-        Long userId = Long.parseLong(authentication.getName());
+    public ResponseEntity<List<FriendshipDTO>> getPendingRequests(
+            @RequestHeader("Authorization") String authHeader) {
+        Long userId = extractUserIdFromToken(authHeader);
         List<FriendshipDTO> requests = friendshipService.getPendingRequests(userId)
                 .stream()
                 .map(FriendshipMapper::toDto)
@@ -87,13 +91,23 @@ public class FriendshipController {
     }
 
     @GetMapping("/requests/sent")
-    public ResponseEntity<List<FriendshipDTO>> getSentRequests(Authentication authentication) {
-        Long userId = Long.parseLong(authentication.getName());
+    public ResponseEntity<List<FriendshipDTO>> getSentRequests(
+            @RequestHeader("Authorization") String authHeader) {
+        Long userId = extractUserIdFromToken(authHeader);
         List<FriendshipDTO> requests = friendshipService.getSentRequests(userId)
                 .stream()
                 .map(FriendshipMapper::toDto)
                 .collect(Collectors.toList());
 
         return ResponseEntity.ok(requests);
+    }
+
+    private Long extractUserIdFromToken(String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            throw new IllegalStateException("Invalid Authorization header");
+        }
+
+        String token = authHeader.substring(7);
+        return jwtUtil.extractUserId(token);
     }
 }
