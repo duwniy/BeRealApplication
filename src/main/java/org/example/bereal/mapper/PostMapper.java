@@ -25,6 +25,11 @@ public class PostMapper {
         post.setSecondaryImageUrl(dto.secondaryImageUrl());
         post.setLate(dto.isLate());
         post.setCaption(dto.caption());
+
+        if (dto.visibility() != null) {
+            post.setVisibility(Post.Visibility.valueOf(dto.visibility()));
+        }
+
         return post;
     }
 }

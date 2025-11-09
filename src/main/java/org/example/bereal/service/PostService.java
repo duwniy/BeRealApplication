@@ -22,16 +22,16 @@ public class PostService {
         if (post.getUserId() == null)
             throw new IllegalArgumentException("User ID cannot be null");
 
-        post.setPostedAt(LocalDateTime.now());
-        post.setLate(checkIfLate(post.getPostedAt()));
+        post.setLate(checkIfLate(LocalDateTime.now()));
         return postRepository.save(post);
     }
 
+
     private boolean checkIfLate(LocalDateTime postedAt) {
-        // Пример: допустимое окно — 2 минуты после "времени вызова"
-        LocalDateTime windowStart = postedAt.withSecond(0).withNano(0);
-        return postedAt.isAfter(windowStart.plusMinutes(2));
+        LocalDateTime callTime = postedAt.toLocalDate().atTime(9, 0); // 9:00 утра
+        return postedAt.isAfter(callTime.plusMinutes(2));
     }
+
 
     public Optional<Post> getPostById(Long id) {
         return postRepository.findById(id);

@@ -26,6 +26,7 @@ public class Post {
     private String caption;
 
     @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
     private Visibility visibility = Visibility.PUBLIC;
 
     @PrePersist
