@@ -1,73 +1,83 @@
-# README
+================================================================================
+BEREAL-LIKE SOCIAL NETWORK BACKEND (API)
+================================================================================
 
-### BEREAL-LIKE SOCIAL NETWORK BACKEND
+1. ОБЗОР ПРОЕКТА
+----------------
+Проект:           BeReal-Like Social Network Backend (REST API)
+Назначение:       RESTful API для мобильного приложения с логикой BeReal —
+                  публикация постов с двух камер в ограниченное время.
+Технологии:       Java 21+, Spring Boot 3.x, Spring Data JPA, Lombok, PostgreSQL
 
-## 1. ОБЗОР ПРОЕКТА
+--------------------------------------------------------------------------------
 
-Проект: BeReal-Like Social Network Backend (API)
-Назначение: Предоставление RESTful API для мобильного приложения с логикой публикации постов в ограниченное время (концепция “BeReal”).
-Технология: Java + Spring Boot 3.x
+2. ТЕКУЩЕЕ СОСТОЯНИЕ
+--------------------
+Реализована базовая архитектура с CRUD для сущности `Post` и поддержкой DTO,
+Mapper, глобальной обработкой ошибок и выборкой постов за текущий день.
 
-## 2. ТЕХНИЧЕСКИЙ СТЕК
+--------------------------------------------------------------------------------
 
-* Язык: Java (JDK 21+)
-* Фреймворк: Spring Boot 3.x
-* ORM: Spring Data JPA / Hibernate
-* База данных: PostgreSQL или MySQL
-* Зависимости: Spring Web, Spring Data JPA, Lombok
+3. АРХИТЕКТУРА ПРОЕКТА
+-----------------------
 
-## 3. ТЕКУЩАЯ СТРУКТУРА КОДА (CRUD для сущности Post)
+📁 **controller/**
+- `PostController.java`  
+  REST API для управления постами.  
+  Поддерживает эндпоинты:
+  - `POST /api/posts` — создать пост  
+  - `GET /api/posts/{id}` — получить пост по ID  
+  - `GET /api/posts` — получить все посты  
+  - `GET /api/posts/today` — посты за сегодня  
+  - `PUT /api/posts/{id}` — обновить пост  
+  - `DELETE /api/posts/{id}` — удалить пост  
 
-### 3.1 Модель данных (Post.java)
+📁 **dto/**
+- `PostDTO.java`  
+  Record (иммутабельный объект передачи данных).  
+  Используется между контроллером и сервисом.
 
-Расположение: src/main/java/org/example/bereal/model/Post.java
-Поля:
+📁 **mapper/**
+- `PostMapper.java`  
+  Преобразует сущность `Post` ↔ DTO `PostDTO`.
 
-* id — Уникальный идентификатор
-* userId — ID автора поста
-* primaryImageUrl — URL изображения с задней камеры
-* secondaryImageUrl — URL изображения с передней камеры (селфи)
-* postedAt — Время публикации
-* isLate — Флаг, указывающий, сделан ли пост поздно
+📁 **model/**
+- `Post.java`  
+  Сущность JPA для таблицы `posts`.  
+  Поля:
+  - `id`, `userId`, `primaryImageUrl`, `secondaryImageUrl`
+  - `postedAt` (автоматически устанавливается при создании)
+  - `isLate`, `caption`, `visibility (PUBLIC, FRIENDS_ONLY, PRIVATE)`
 
-### 3.2 Репозиторий (PostRepository.java)
+📁 **repository/**
+- `PostRepository.java`  
+  Интерфейс `JpaRepository<Post, Long>` с кастомными методами поиска:
+  - `findByUserIdAndPostedAtBetween(...)`
+  - `findByPostedAtBetween(...)`
 
-Расположение: src/main/java/org/example/bereal/repository/PostRepository.java
-Назначение: доступ к данным, расширяет JpaRepository, предоставляет CRUD-операции и кастомные запросы.
+📁 **service/**
+- `PostService.java`  
+  Содержит бизнес-логику:
+  - Проверка “опоздания” поста (`checkIfLate`)
+  - CRUD-операции через `PostRepository`
+  - Выборка постов за сегодня
 
-### 3.3 Сервис (PostService.java)
+📁 **exception/**
+- `GlobalExceptionHandler.java`  
+  Централизованная обработка ошибок (400, 404) с JSON-ответом.
 
-Расположение: src/main/java/org/example/bereal/service/PostService.java
-Назначение: бизнес-логика приложения. Методы: createPost, getPostById, getAllPosts, updatePost, deletePost.
+--------------------------------------------------------------------------------
 
-### 3.4 Контроллер (PostController.java)
+4. КОНФИГУРАЦИЯ БАЗЫ ДАННЫХ
+----------------------------
+Создайте файл:  
+`src/main/resources/application.properties`
 
-Расположение: src/main/java/org/example/bereal/controller/PostController.java
-Эндпоинты:
-
-* POST /api/posts
-* GET /api/posts/{id}
-* GET /api/posts
-* PUT /api/posts/{id}
-* DELETE /api/posts/{id}
-
-## 4. ТРЕБОВАНИЯ К НАСТРОЙКЕ
-
-Настройка подключения к БД через src/main/resources/application.properties:
-
-```
+Пример (PostgreSQL):
+```properties
 spring.datasource.url=jdbc:postgresql://localhost:5432/bereal_db
 spring.datasource.driver-class-name=org.postgresql.Driver
 spring.datasource.username=your_postgres_user
 spring.datasource.password=your_postgres_password
 spring.jpa.hibernate.ddl-auto=update
-```
-
-## 5. ПЛАН РАЗВИТИЯ (TODO)
-
-1. Безопасность: Spring Security, JWT, сущность User
-2. Файлы: загрузка изображений в облачное хранилище
-3. Планирование: сервис уведомлений (@Scheduled)
-4. Лента: FeedService для постов друзей
-5. Реакции: сущность RealMoji для реакций на посты
 
