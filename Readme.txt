@@ -5309,4 +5309,1057 @@ on:
 
 jobs:
   test:
-    runs
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+    
+    - name: Run tests
+      run: mvn clean test
+    
+    - name: Generate test coverage report
+      run: mvn jacoco:report
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./target/site/jacoco/jacoco.xml
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+    
+    - name: Build with Maven
+      run: mvn clean package -DskipTests
+    
+    - name: Build Docker image
+      run: docker build -t bereal-app:${{ github.sha }} .
+    
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Push Docker image
+      run: |
+        docker tag bereal-app:${{ github.sha }} your-dockerhub/bereal:latest
+        docker push your-dockerhub/bereal:latest
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Deploy to production
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.PRODUCTION_HOST }}
+        username: ${{ secrets.PRODUCTION_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          cd /var/www/bereal
+          docker-compose pull
+          docker-compose up -d
+          docker system prune -f
+
+14.5 МОНИТОРИНГ И ЛОГИРОВАНИЕ
+------------------------------
+
+Prometheus Configuration (prometheus.yml):
+
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'bereal-app'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['bereal-app:8080']
+
+Grafana Dashboard:
+
+Импортируйте dashboard ID: 4701 (JVM Micrometer)
+
+Кастомные метрики в приложении:
+
+@Component
+public class CustomMetrics {
+    
+    private final Counter postCreatedCounter;
+    private final Counter friendRequestCounter;
+    private final Gauge activeUsersGauge;
+    
+    public CustomMetrics(MeterRegistry registry) {
+        this.postCreatedCounter = Counter.builder("posts.created")
+            .description("Total number of posts created")
+            .register(registry);
+        
+        this.friendRequestCounter = Counter.builder("friend.requests.sent")
+            .description("Total friend requests sent")
+            .register(registry);
+        
+        this.activeUsersGauge = Gauge.builder("users.active", this, CustomMetrics::getActiveUsers)
+            .description("Number of active users")
+            .register(registry);
+    }
+    
+    public void incrementPostCreated() {
+        postCreatedCounter.increment();
+    }
+    
+    public void incrementFriendRequest() {
+        friendRequestCounter.increment();
+    }
+    
+    private double getActiveUsers() {
+        // Логика подсчета активных пользователей
+        return 0;
+    }
+}
+
+ELK Stack для логов:
+
+Logstash configuration (logstash.conf):
+
+input {
+  file {
+    path => "/var/log/bereal/application.log"
+    start_position => "beginning"
+  }
+}
+
+filter {
+  grok {
+    match => { "message" => "%{TIMESTAMP_ISO8601:timestamp} \[%{DATA:thread}\] %{LOGLEVEL:level} %{DATA:logger} - %{GREEDYDATA:message}" }
+  }
+  
+  date {
+    match => [ "timestamp", "yyyy-MM-dd HH:mm:ss.SSS" ]
+  }
+}
+
+output {
+  elasticsearch {
+    hosts => ["elasticsearch:9200"]
+    index => "bereal-logs-%{+YYYY.MM.dd}"
+  }
+}
+
+14.6 BACKUP СТРАТЕГИЯ
+---------------------
+
+Автоматический backup PostgreSQL:
+
+#!/bin/bash
+# backup.sh
+
+BACKUP_DIR="/var/backups/bereal"
+DATE=$(date +%Y%m%d_%H%M%S)
+DB_NAME="bereal_db"
+DB_USER="bereal_user"
+
+# Create backup directory if not exists
+mkdir -p $BACKUP_DIR
+
+# Dump database
+pg_dump -U $DB_USER -F c $DB_NAME > $BACKUP_DIR/bereal_backup_$DATE.dump
+
+# Compress backup
+gzip $BACKUP_DIR/bereal_backup_$DATE.dump
+
+# Delete backups older than 30 days
+find $BACKUP_DIR -name "*.dump.gz" -mtime +30 -delete
+
+# Upload to S3 (optional)
+aws s3 cp $BACKUP_DIR/bereal_backup_$DATE.dump.gz s3://your-bucket/backups/
+
+echo "Backup completed: bereal_backup_$DATE.dump.gz"
+
+Добавьте в crontab:
+
+crontab -e
+
+# Daily backup at 2 AM
+0 2 * * * /path/to/backup.sh
+
+Восстановление из backup:
+
+pg_restore -U bereal_user -d bereal_db /var/backups/bereal/bereal_backup_20241110.dump.gz
+
+14.7 NGINX REVERSE PROXY
+-------------------------
+
+/etc/nginx/sites-available/bereal:
+
+upstream bereal_backend {
+    server localhost:8080;
+    # Для load balancing добавьте больше серверов:
+    # server localhost:8081;
+    # server localhost:8082;
+}
+
+server {
+    listen 80;
+    server_name yourdomain.com www.yourdomain.com;
+    
+    # Redirect to HTTPS
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name yourdomain.com www.yourdomain.com;
+    
+    # SSL certificates (Let's Encrypt)
+    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+    
+    # SSL configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    
+    # Logs
+    access_log /var/log/nginx/bereal_access.log;
+    error_log /var/log/nginx/bereal_error.log;
+    
+    # Client body size (for file uploads)
+    client_max_body_size 10M;
+    
+    # Proxy settings
+    location / {
+        proxy_pass http://bereal_backend;
+        proxy_http_version 1.1;
+        
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+    
+    # Static files (images)
+    location /images/ {
+        alias /var/www/bereal/uploads/images/;
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+    }
+    
+    # Health check endpoint
+    location /actuator/health {
+        proxy_pass http://bereal_backend;
+        access_log off;
+    }
+}
+
+Включить конфигурацию:
+
+sudo ln -s /etc/nginx/sites-available/bereal /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+
+Получить SSL сертификат (Let's Encrypt):
+
+sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+
+Автообновление сертификата:
+
+sudo certbot renew --dry-run
+
+14.8 SYSTEMD SERVICE
+--------------------
+
+/etc/systemd/system/bereal.service:
+
+[Unit]
+Description=BeReal Spring Boot Application
+After=syslog.target network.target postgresql.service
+
+[Service]
+Type=simple
+User=bereal
+Group=bereal
+WorkingDirectory=/var/www/bereal
+
+Environment="SPRING_PROFILES_ACTIVE=production"
+Environment="DB_URL=jdbc:postgresql://localhost:5432/bereal_db"
+Environment="DB_USERNAME=bereal_user"
+Environment="DB_PASSWORD=your_secure_password"
+Environment="JWT_SECRET=your_jwt_secret"
+
+ExecStart=/usr/bin/java -jar /var/www/bereal/bereal-1.0.0.jar
+
+SuccessExitStatus=143
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bereal
+
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
+Управление сервисом:
+
+# Перезагрузить systemd
+sudo systemctl daemon-reload
+
+# Запустить сервис
+sudo systemctl start bereal
+
+# Включить автозапуск
+sudo systemctl enable bereal
+
+# Проверить статус
+sudo systemctl status bereal
+
+# Просмотр логов
+sudo journalctl -u bereal -f
+
+# Остановить сервис
+sudo systemctl stop bereal
+
+# Перезапустить сервис
+sudo systemctl restart bereal
+
+
+================================================================================
+                        15. TROUBLESHOOTING
+================================================================================
+
+15.1 ЧАСТЫЕ ПРОБЛЕМЫ И РЕШЕНИЯ
+-------------------------------
+
+ПРОБЛЕМА: 403 Forbidden при запросе к /api/posts
+
+ПРИЧИНА: Отсутствует JWT токен в заголовке Authorization
+
+РЕШЕНИЕ:
+1. Получите токен через /api/auth/login
+2. Добавьте заголовок: Authorization: Bearer <token>
+3. Проверьте срок действия токена (по умолчанию 24 часа)
+
+curl -X GET http://localhost:8080/api/posts \
+  -H "Authorization: Bearer eyJhbGciOiJIUzUxMiJ9..."
+
+---
+
+ПРОБЛЕМА: 400 Bad Request "For input string: duwniy"
+
+ПРИЧИНА: Попытка конвертировать username в Long в методе extractUserId()
+
+РЕШЕНИЕ: Используйте JwtUtil.extractUserId() вместо парсинга authentication.getName()
+
+Было:
+Long userId = Long.parseLong(authentication.getName());
+
+Стало:
+String authHeader = request.getHeader("Authorization");
+String token = authHeader.substring(7);
+Long userId = jwtUtil.extractUserId(token);
+
+---
+
+ПРОБЛЕМА: 409 Conflict "You have already posted today"
+
+ПРИЧИНА: Попытка создать второй пост за день
+
+РЕШЕНИЕ:
+1. Это корректное поведение - один пост в день
+2. Подождите до следующего дня (00:00:00)
+3. Для тестирования: удалите существующий пост или очистите БД
+
+DELETE FROM posts WHERE user_id = 1 AND DATE(posted_at) = CURRENT_DATE;
+
+---
+
+ПРОБЛЕМА: Connection refused к PostgreSQL
+
+ПРИЧИНА: PostgreSQL не запущен или неверные credentials
+
+РЕШЕНИЕ:
+1. Проверьте статус PostgreSQL:
+   sudo systemctl status postgresql
+   
+2. Запустите PostgreSQL:
+   sudo systemctl start postgresql
+   
+3. Проверьте application.properties:
+   spring.datasource.url=jdbc:postgresql://localhost:5432/bereal_db
+   spring.datasource.username=bereal_user
+   spring.datasource.password=your_password
+
+4. Проверьте подключение:
+   psql -U bereal_user -d bereal_db
+
+---
+
+ПРОБЛЕМА: OutOfMemoryError
+
+ПРИЧИНА: Недостаточно heap memory для JVM
+
+РЕШЕНИЕ:
+Увеличьте heap size:
+
+java -Xms512m -Xmx2g -jar bereal.jar
+
+Или в systemd service:
+Environment="JAVA_OPTS=-Xms512m -Xmx2g"
+
+---
+
+ПРОБЛЕМА: Images не отображаются (404)
+
+ПРИЧИНА: Файлы не найдены в директории uploads/images/
+
+РЕШЕНИЕ:
+1. Проверьте существование директории:
+   ls -la uploads/images/
+
+2. Проверьте права доступа:
+   chmod 755 uploads/images/
+
+3. Проверьте FileController маппинг:
+   @GetMapping("/images/{fileName}")
+
+4. Проверьте URL в браузере:
+   http://localhost:8080/images/1_primary_550e8400...jpg
+
+---
+
+ПРОБЛЕМА: JWT token expired
+
+ПРИЧИНА: Срок действия токена истек (default: 24 часа)
+
+РЕШЕНИЕ:
+1. Получите новый токен через /api/auth/login
+2. Увеличьте срок в application.properties:
+   jwt.expiration=86400000  # 24 часа в миллисекундах
+
+3. Реализуйте refresh token механизм (TODO)
+
+---
+
+ПРОБЛЕМА: CORS ошибка в браузере
+
+ПРИЧИНА: Frontend и Backend на разных доменах
+
+РЕШЕНИЕ:
+Добавьте CORS конфигурацию:
+
+@Configuration
+public class CorsConfig {
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(Arrays.asList("http://localhost:3000"));
+        config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE"));
+        config.setAllowedHeaders(Arrays.asList("*"));
+        config.setAllowCredentials(true);
+        
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
+    }
+}
+
+---
+
+ПРОБЛЕМА: Flyway migration failed
+
+ПРИЧИНА: Конфликт между Hibernate DDL и Flyway
+
+РЕШЕНИЕ:
+1. Отключите Hibernate DDL:
+   spring.jpa.hibernate.ddl-auto=validate
+
+2. Создайте Flyway миграции вручную:
+   src/main/resources/db/migration/V1__initial_schema.sql
+
+3. Или используйте baseline:
+   spring.flyway.baseline-on-migrate=true
+
+---
+
+ПРОБЛЕМА: Port 8080 already in use
+
+ПРИЧИНА: Другое приложение использует порт 8080
+
+РЕШЕНИЕ:
+1. Найдите процесс:
+   lsof -i :8080
+   netstat -ano | findstr :8080  (Windows)
+
+2. Убейте процесс:
+   kill -9 <PID>
+   taskkill /PID <PID> /F  (Windows)
+
+3. Или измените порт:
+   server.port=8081
+
+15.2 DEBUG СОВЕТЫ
+-----------------
+
+Включить DEBUG логи:
+
+logging.level.org.example.bereal=DEBUG
+logging.level.org.springframework.security=DEBUG
+logging.level.org.hibernate.SQL=DEBUG
+logging.level.org.hibernate.type.descriptor.sql.BasicBinder=TRACE
+
+Посмотреть все SQL запросы:
+
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+
+Проверить JWT токен:
+
+Используйте https://jwt.io для декодирования токена
+Проверьте claims: userId, sub, iat, exp
+
+Проверить подключение к БД:
+
+@RestController
+@RequestMapping("/api/debug")
+public class DebugController {
+    
+    @Autowired
+    private DataSource dataSource;
+    
+    @GetMapping("/db-test")
+    public String testDbConnection() {
+        try (Connection conn = dataSource.getConnection()) {
+            return "Database connected: " + conn.getMetaData().getURL();
+        } catch (SQLException e) {
+            return "Database connection failed: " + e.getMessage();
+        }
+    }
+}
+
+Профилирование производительности:
+
+@Component
+@Aspect
+public class PerformanceAspect {
+    
+    private static final Logger log = LoggerFactory.getLogger(PerformanceAspect.class);
+    
+    @Around("execution(* org.example.bereal.service.*.*(..))")
+    public Object logExecutionTime(ProceedingJoinPoint joinPoint) throws Throwable {
+        long start = System.currentTimeMillis();
+        
+        Object result = joinPoint.proceed();
+        
+        long executionTime = System.currentTimeMillis() - start;
+        log.debug("{} executed in {}ms", joinPoint.getSignature(), executionTime);
+        
+        return result;
+    }
+}
+
+15.3 ПОЛЕЗНЫЕ КОМАНДЫ
+---------------------
+
+Проверить здоровье приложения:
+
+curl http://localhost:8080/actuator/health
+
+Просмотр метрик:
+
+curl http://localhost:8080/actuator/metrics
+
+Очистка БД (для разработки):
+
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
+GRANT ALL ON SCHEMA public TO bereal_user;
+
+Экспорт данных:
+
+pg_dump -U bereal_user bereal_db > backup.sql
+
+Импорт данных:
+
+psql -U bereal_user bereal_db < backup.sql
+
+Мониторинг в реальном времени:
+
+# CPU и Memory
+docker stats bereal-app
+
+# Логи
+tail -f /var/log/bereal/application.log
+
+# Подключения к БД
+SELECT * FROM pg_stat_activity WHERE datname = 'bereal_db';
+
+
+================================================================================
+                        16. FAQ
+================================================================================
+
+Q: Можно ли изменить BeReal время вручную?
+
+A: Да, через прямой INSERT в таблицу bereal_times:
+
+INSERT INTO bereal_times (notification_time, sent) 
+VALUES ('2024-11-10 15:00:00', false);
+
+Или изменить scheduler на manual trigger endpoint.
+
+---
+
+Q: Как добавить несколько ролей пользователю?
+
+A: При регистрации или через UPDATE:
+
+INSERT INTO user_roles (user_id, role) VALUES (1, 'ADMIN');
+
+В коде:
+user.getRoles().add("ADMIN");
+userRepository.save(user);
+
+---
+
+Q: Можно ли удалить пост и создать новый в тот же день?
+
+A: Да, текущая реализация это позволяет. Если нужно запретить:
+
+private boolean hasUserEverPostedToday(Long userId) {
+    // Проверить не только существующие посты, но и deleted_at
+}
+
+---
+
+Q: Как реализовать forgot password?
+
+A: Нужно добавить:
+1. PasswordResetToken Entity (token, userId, expiresAt)
+2. Email service для отправки токена
+3. Endpoint /api/auth/forgot-password
+4. Endpoint /api/auth/reset-password/{token}
+
+---
+
+Q: Поддерживает ли API pagination для друзей?
+
+A: Текущая версия возвращает List<Long>. Для пагинации добавьте:
+
+Page<Long> getFriends(Long userId, Pageable pageable);
+
+---
+
+Q: Как добавить поиск пользователей?
+
+A: Добавьте в UserRepository:
+
+@Query("SELECT u FROM User u WHERE LOWER(u.username) LIKE LOWER(CONCAT('%', :query, '%'))")
+Page<User> searchUsers(@Param("query") String query, Pageable pageable);
+
+Endpoint:
+GET /api/users/search?q=john&page=0&size=10
+
+---
+
+Q: Можно ли лайкать посты?
+
+A: Нужно добавить:
+
+@Entity
+public class PostLike {
+    private Long id;
+    private Long postId;
+    private Long userId;
+    private LocalDateTime likedAt;
+}
+
+Endpoint: POST /api/posts/{id}/like
+
+---
+
+Q: Как добавить комментарии?
+
+A: Создайте Comment Entity:
+
+@Entity
+public class Comment {
+    private Long id;
+    private Long postId;
+    private Long userId;
+    private String text;
+    private LocalDateTime createdAt;
+}
+
+---
+
+Q: Поддерживается ли WebSocket для real-time уведомлений?
+
+A: Нет, но можно добавить:
+
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-websocket</artifactId>
+</dependency>
+
+@Configuration
+@EnableWebSocketMessageBroker
+public class WebSocketConfig implements WebSocketMessageBrokerConfigurer { ... }
+
+---
+
+Q: Как миг
+
+рировать с H2 на PostgreSQL?
+
+A: 
+1. Экспортируйте данные из H2
+2. Измените application.properties
+3. Запустите приложение (Hibernate создаст схему)
+4. Импортируйте данные
+
+
+================================================================================
+                        17. ROADMAP
+================================================================================
+
+17.1 ПЛАНИРУЕМЫЕ ФУНКЦИИ
+-------------------------
+
+SHORT TERM (1-3 месяца):
+
+✅ JWT Authentication - DONE
+✅ Post CRUD - DONE
+✅ Friendship System - DONE
+✅ File Upload - DONE
+✅ One Post Per Day - DONE
+✅ BeReal Time Generation - DONE
+✅ Post Visibility - DONE
+
+⏳ RealMojis (Emoji Reactions)
+   - Entity: PostReaction (postId, userId, emojiType)
+   - Endpoint: POST /api/posts/{id}/react
+   - Support custom emoji selection
+
+⏳ Comments
+   - Entity: Comment (postId, userId, text, createdAt)
+   - Endpoint: POST /api/posts/{id}/comments
+   - GET /api/posts/{id}/comments with pagination
+
+⏳ Push Notifications
+   - Firebase Cloud Messaging integration
+   - Notify users at BeReal time
+   - Notify on friend requests, reactions
+
+⏳ Email Verification
+   - Send verification email on registration
+   - Verify email before full account access
+   - Resend verification email
+
+⏳ Password Reset
+   - Forgot password flow
+   - Email with reset token
+   - Reset password endpoint
+
+MEDIUM TERM (3-6 месяцев):
+
+□ User Profile Enhancements
+   - Profile picture upload
+   - Bio/description
+   - Public profile view
+
+□ Discovery Feed
+   - Global feed of PUBLIC posts
+   - Algorithm for interesting content
+   - Filter by location (if added)
+
+□ Geolocation
+   - Store post location
+   - Show location on map
+   - Privacy settings for location
+
+□ Memories
+   - View past posts (history)
+   - "On this day" feature
+   - Download own posts
+
+□ Stories/BeReal Extras
+   - Multiple photos per day (behind paywall?)
+   - Video support
+   - Filters/effects
+
+□ Admin Panel
+   - User management
+   - Content moderation
+   - Analytics dashboard
+
+LONG TERM (6-12 месяцев):
+
+□ Mobile Apps
+   - React Native app
+   - iOS and Android native apps
+   - Push notifications integration
+
+□ S3/CDN Integration
+   - Move from local storage to S3
+   - CloudFront for global distribution
+   - Automatic image optimization
+
+□ Advanced Analytics
+   - User engagement metrics
+   - Popular times analysis
+   - Friend network analysis
+
+□ Machine Learning
+   - Content moderation (NSFW detection)
+   - Personalized BeReal times
+   - Friend suggestions
+
+□ Monetization
+   - Premium features
+   - Ad-free experience
+   - Extended post history
+
+□ Internationalization
+   - Multi-language support
+   - Timezone handling per user
+   - Localized content
+
+17.2 ТЕХНИЧЕСКИЕ УЛУЧШЕНИЯ
+---------------------------
+
+ПРОИЗВОДИТЕЛЬНОСТЬ:
+
+□ Redis Caching
+   - Cache frequent queries
+   - Session storage
+   - Rate limiting
+
+□ Database Optimization
+   - Query optimization
+   - Proper indexing
+   - Connection pooling tuning
+
+□ Async Processing
+   - Async image processing
+   - Background jobs (email sending)
+   - Queue system (RabbitMQ/Kafka)
+
+БЕЗОПАСНОСТЬ:
+
+□ Rate Limiting
+   - API rate limits per user
+   - Login attempt limits
+   - Brute force protection
+
+□ Advanced JWT
+   - Refresh tokens
+   - Token blacklist (logout)
+   - Sliding expiration
+
+□ Input Sanitization
+   - XSS protection
+   - SQL injection prevention
+   - File upload validation
+
+ТЕСТИРОВАНИЕ:
+
+□ Увеличение покрытия тестами
+   - Target: 80%+ coverage
+   - Integration tests
+   - E2E tests
+
+□ Performance Testing
+   - Load testing (JMeter/Gatling)
+   - Stress testing
+   - Endurance testing
+
+□ Security Testing
+   - Penetration testing
+   - Vulnerability scanning
+   - OWASP Top 10 compliance
+
+
+================================================================================
+                        18. ВКЛАД В ПРОЕКТ
+================================================================================
+
+18.1 КАК ВНЕСТИ ВКЛАД
+---------------------
+
+Мы приветствуем contributions от community!
+
+ШАГИ:
+
+1. Fork репозитория
+   https://github.com/duwniy/BeRealApplication/fork
+
+2. Клонируйте ваш fork
+   git clone https://github.com/YOUR_USERNAME/BeRealApplication.git
+
+3. Создайте feature branch
+   git checkout -b feature/amazing-feature
+
+4. Сделайте изменения и commit
+   git add .
+   git commit -m "Add amazing feature"
+
+5. Push в ваш fork
+   git push origin feature/amazing-feature
+
+6. Создайте Pull Request
+   Откройте PR на GitHub с описанием изменений
+
+GUIDELINES:
+
+- Следуйте существующему code style
+- Добавьте тесты для новой функциональности
+- Обновите документацию если нужно
+- Один PR = одна фича (не смешивайте разные фичи)
+- Пишите понятные commit messages
+
+CODE STYLE:
+
+- Java: Google Java Style Guide
+- Naming: camelCase для переменных, PascalCase для классов
+- Комментарии: JavaDoc для public методов
+- Максимальная длина строки: 120 символов
+
+18.2 REPORTING BUGS
+-------------------
+
+Нашли баг? Создайте Issue на GitHub:
+
+TEMPLATE:
+
+**Describe the bug**
+A clear description of what the bug is.
+
+**To Reproduce**
+Steps to reproduce:
+1. Go to '...'
+2. Click on '....'
+3. See error
+
+**Expected behavior**
+What you expected to happen.
+
+**Screenshots**
+If applicable, add screenshots.
+
+**Environment:**
+ - OS: [e.g. Ubuntu 22.04]
+ - Java Version: [e.g. 17]
+ - PostgreSQL Version: [e.g. 15]
+
+**Additional context**
+Any other context about the problem.
+
+18.3 FEATURE REQUESTS
+---------------------
+
+Есть идея для новой фичи?
+
+TEMPLATE:
+
+**Is your feature request related to a problem?**
+A clear description of the problem.
+
+**Describe the solution you'd like**
+How you envision the feature working.
+
+**Describe alternatives you've considered**
+Any alternative solutions.
+
+**Additional context**
+Mockups, examples, etc.
+
+18.4 ЛИЦЕНЗИЯ
+-------------
+
+MIT License
+
+Copyright (c) 2024 duwniy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+                        19. БЛАГОДАРНОСТИ
+================================================================================
+
+Проект создан с использованием:
+
+- Spring Framework Team - за отличный framework
+- PostgreSQL Global Development Group - за надежную БД
+- JWT.io - за стандарт токенов
+- Maven Central - за управление зависимостями
+- Stack Overflow Community - за помощь в решении проблем
+- GitHub - за hosting и collaboration tools
+
+Вдохновлено оригинальным приложением BeReal.
+
+
+================================================================================
+                        20. КОНТАКТЫ
+================================================================================
+
+GitHub: https://github.com/duwniy
+Repository: https://github.com/duwniy/BeRealApplication
+
+Для вопросов и предложений создавайте Issues на GitHub.
+
+
+================================================================================
+                            КОНЕЦ ДОКУМЕНТАЦИИ
+================================================================================
+
+Версия документации: 1.0.0
+Дата последнего обновления: 10 ноября 2024
+Версия приложения: 1.0.0
