@@ -1,6 +1,5 @@
 package org.example.bereal.controller;
 
-import jakarta.validation.Valid;
 import org.example.bereal.dto.PostDTO;
 import org.example.bereal.mapper.PostMapper;
 import org.example.bereal.model.Post;
@@ -15,7 +14,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
