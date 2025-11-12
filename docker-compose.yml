@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  # --- СЕРВИС DB (PostgreSQL) ---
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: duwniy
+      POSTGRES_PASSWORD: duwniy00
+      POSTGRES_DB: bereal
+    ports:
+      - "5433:5432" # Убедитесь, что вы оставили 5433, если 5432 занят
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # --- СЕРВИС WEB (Spring Boot) ---
+  web:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db # Теперь этот сервис существует!
+    environment:
+      DB_HOST: db
+      DB_USER: duwniy
+      DB_PASSWORD: duwniy00
+      DB_NAME: bereal
+      DB_PORT: 5432
+    restart: always
+    volumes: # Это правильно, если вы внесли изменения из предыдущего шага
+      - ./uploads:/app/uploads
+
+volumes:
+  postgres_data:
