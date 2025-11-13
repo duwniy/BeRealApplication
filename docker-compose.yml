@@ -1,7 +1,4 @@
-version: '3.8'
-
 services:
-  # --- СЕРВИС DB (PostgreSQL) ---
   db:
     image: postgres:15-alpine
     restart: always
@@ -9,27 +6,22 @@ services:
       POSTGRES_USER: duwniy
       POSTGRES_PASSWORD: duwniy00
       POSTGRES_DB: bereal
-    ports:
-      - "5433:5432" # Убедитесь, что вы оставили 5433, если 5432 занят
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - db_data:/var/lib/postgresql/data
+      - ./docker-init:/docker-entrypoint-initdb.d
+    ports:
+      - "5433:5432"   # хост:контейнер
 
-  # --- СЕРВИС WEB (Spring Boot) ---
-  web:
+  app:
     build: .
+    depends_on:
+      - db
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/bereal  # внутренний порт контейнера
+      SPRING_DATASOURCE_USERNAME: duwniy
+      SPRING_DATASOURCE_PASSWORD: duwniy00
     ports:
       - "8080:8080"
-    depends_on:
-      - db # Теперь этот сервис существует!
-    environment:
-      DB_HOST: db
-      DB_USER: duwniy
-      DB_PASSWORD: duwniy00
-      DB_NAME: bereal
-      DB_PORT: 5432
-    restart: always
-    volumes: # Это правильно, если вы внесли изменения из предыдущего шага
-      - ./uploads:/app/uploads
 
 volumes:
-  postgres_data:
+  db_data:

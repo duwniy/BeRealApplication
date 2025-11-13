@@ -1,21 +1,28 @@
-FROM maven:3.9.5-eclipse-temurin-21-alpine AS build
+# СТАДИЯ 1: СБОРКА ПРОЕКТА
+FROM maven:3.9.5-eclipse-temurin-17 AS build
 
+# Устанавливаем рабочую директорию внутри контейнера
 WORKDIR /app
 
+# Копируем файлы конфигурации и исходники
 COPY pom.xml .
-
-RUN mvn dependency:go-offline
-
 COPY src ./src
 
-RUN mvn clean install -DskipTests
+# Собираем проект, пропуская тесты (для ускорения)
+RUN mvn clean package -DskipTests
 
-FROM eclipse-temurin:21-jre-alpine
+# СТАДИЯ 2: ЗАПУСК ПРИЛОЖЕНИЯ
+# Используем минимальный образ JRE для меньшего размера и безопасности
+FROM eclipse-temurin:17-jre-focal
 
+# Устанавливаем рабочую директорию
 WORKDIR /app
 
+# Копируем JAR-файл из СТАДИИ СБОРКИ
 COPY --from=build /app/target/*.jar app.jar
 
+# Порт, который слушает Spring Boot
 EXPOSE 8080
 
+# Команда для запуска приложения
 ENTRYPOINT ["java", "-jar", "app.jar"]
